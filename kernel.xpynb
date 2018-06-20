@@ -1,0 +1,305 @@
+{
+  "cells": [
+    {
+      "metadata": {
+        "_uuid": "8f2839f25d086af736a60e9eeb907d3b93b6e0e5",
+        "_cell_guid": "b1076dfc-b9ad-4769-8c92-a6c4dae69d19",
+        "trusted": true
+      },
+      "cell_type": "code",
+      "source": "# This Python 3 environment comes with many helpful analytics libraries installed\n# It is defined by the kaggle/python docker image: https://github.com/kaggle/docker-python\n# For example, here's several helpful packages to load in \n\nimport numpy as np # linear algebra\nimport pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)\n\n# Input data files are available in the \"../input/\" directory.\n# For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory\n\nimport os\nprint(os.listdir(\"../input\"))\n\n# Any results you write to the current directory are saved as output.",
+      "execution_count": 1,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "['moviereviewsentimentalanalysis', 'glove840b300dtxt']\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "_cell_guid": "79c7e3d0-c299-4dcb-8224-4455121ee9b0",
+        "_uuid": "d629ff2d2480ee46fbb7e2d37f6b5fab8052498a",
+        "trusted": true
+      },
+      "cell_type": "code",
+      "source": "import numpy as np\nnp.random.seed(233)\nimport pandas as pd\n\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score\nimport re, gc\nfrom keras import optimizers, utils\nfrom keras.models import Model\nfrom keras.layers import Input, Dense, Embedding, SpatialDropout1D, concatenate, Dropout, Flatten, Conv2D, MaxPooling2D, Activation, MaxPool2D\nfrom keras.layers import GRU, Bidirectional, GlobalAveragePooling1D, GlobalMaxPooling1D, Conv1D, MaxPooling1D, BatchNormalization, Reshape\nfrom keras.preprocessing import text, sequence\nfrom keras.callbacks import Callback, EarlyStopping\nfrom keras import backend as K",
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "Using TensorFlow backend.\n",
+          "name": "stderr"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "8552db1d4bfd08ff8f1c342a9f786bb5e9cc82ba",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "df_train = pd.read_csv('../input/moviereviewsentimentalanalysis/train.tsv', sep='\\t', header=0)\nfeature_names = list(df_train.columns.values)\nX_train = df_train['Phrase'].values\nY_train = df_train['Sentiment'].values\n\ndf_test = pd.read_csv('../input/moviereviewsentimentalanalysis/test.tsv', sep='\\t', header=0)\nX_test = df_test['Phrase'].values\nX_test_PhraseID = df_test['PhraseId']",
+      "execution_count": 3,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "fca5cba2b6923c87aa31703ccee9abbc322396e7",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "max_features = 20000\nmaxlen = 160\nembed_size = 300\n",
+      "execution_count": 4,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "b407fd3924b40d5fe410bfb84251206587eec55a",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "def pad(text):\n    if (len(text) < 90):\n        text += \" \"\n    while (len(text) < 90):\n        text += text \n    return text\n\nX_train = df_train['Phrase'].apply(pad).values\nX_test = df_test['Phrase'].apply(pad).values\n",
+      "execution_count": 5,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "88fcd63e447f5840b553d87acfe990a430144e62",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "tokenizer = text.Tokenizer()\ntokenizer.fit_on_texts(list(X_train) + list(X_test))\nX_train = tokenizer.texts_to_sequences(X_train)\nX_test = tokenizer.texts_to_sequences(X_test)\nX_train = sequence.pad_sequences(X_train, maxlen=maxlen)\nX_test = sequence.pad_sequences(X_test, maxlen=maxlen)\n\nY_train = utils.to_categorical(Y_train, 5)",
+      "execution_count": 6,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "1a8173864c23371307b3eb800448040a3c6f5f9b",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "EMBEDDING_FILE = '../input/glove840b300dtxt/glove.840B.300d.txt'\nembeddings_index = {}\nwith open(EMBEDDING_FILE,encoding='utf8') as f:\n    for line in f:\n        values = line.rstrip().rsplit(' ')\n        word = values[0]\n        coefs = np.asarray(values[1:], dtype='float32')\n        embeddings_index[word] = coefs",
+      "execution_count": 7,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "49115033b1fa5c438aaace5dda8a917bc2455c8e"
+      },
+      "cell_type": "code",
+      "source": "word_index = tokenizer.word_index\n#prepare embedding matrix\nnum_words = min(max_features, len(word_index) + 1)\nembedding_matrix = np.zeros((num_words, embed_size))\nfor word, i in word_index.items():\n    if i >= max_features:\n        continue\n    embedding_vector = embeddings_index.get(word)\n    if embedding_vector is not None:\n        # words not found in embedding index will be all-zeros.\n        embedding_matrix[i] = embedding_vector\n",
+      "execution_count": 8,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "begin trainnig\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "5c58d628091585afb289a8bb2a829cdf931c08ef",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "#写一个LossHistory类，保存loss和acc\nclass LossHistory(Callback):\n    def on_train_begin(self, logs={}):\n        self.losses = {'batch':[], 'epoch':[]}\n        self.accuracy = {'batch':[], 'epoch':[]}\n        self.val_loss = {'batch':[], 'epoch':[]}\n        self.val_acc = {'batch':[], 'epoch':[]}\n\n    def on_batch_end(self, batch, logs={}):\n        self.losses['batch'].append(logs.get('loss'))\n        self.accuracy['batch'].append(logs.get('acc'))\n        self.val_loss['batch'].append(logs.get('val_loss'))\n        self.val_acc['batch'].append(logs.get('val_acc'))\n\n    def on_epoch_end(self, batch, logs={}):\n        self.losses['epoch'].append(logs.get('loss'))\n        self.accuracy['epoch'].append(logs.get('acc'))\n        self.val_loss['epoch'].append(logs.get('val_loss'))\n        self.val_acc['epoch'].append(logs.get('val_acc'))\n\n    def loss_plot(self, loss_type):\n        iters = range(len(self.losses[loss_type]))\n        plt.figure()\n        # acc\n        plt.plot(iters, self.accuracy[loss_type], 'r', label='train acc')\n        # loss\n        plt.plot(iters, self.losses[loss_type], 'g', label='train loss')\n        if loss_type == 'epoch':\n            # val_acc\n            plt.plot(iters, self.val_acc[loss_type], 'b', label='val acc')\n            # val_loss\n            plt.plot(iters, self.val_loss[loss_type], 'k', label='val loss')\n        plt.grid(True)\n        plt.xlabel(loss_type)\n        plt.ylabel('acc-loss')\n        plt.legend(loc=\"upper right\")\n        plt.show()",
+      "execution_count": 9,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "collapsed": true,
+        "_uuid": "cbde863c3233ce75ebfba1b6705b69499455e938"
+      },
+      "cell_type": "code",
+      "source": "\nfilter_sizes = [2,3,4]\nnum_filters = 32\n\ndef TextCNN():    \n    inp = Input(shape=(maxlen, ))\n    x = Embedding(len(word_index) + 1, embed_size, weights=[embedding_matrix])(inp)\n    x = Reshape((maxlen, embed_size, 1))(x)\n    \n    conv_0 = Conv2D(num_filters, kernel_size=(filter_sizes[0], embed_size), kernel_initializer='normal',\n                                                                                    activation='relu')(x)\n    conv_1 = Conv2D(num_filters, kernel_size=(filter_sizes[1], embed_size), kernel_initializer='normal',\n                                                                                    activation='relu')(x)\n    conv_2 = Conv2D(num_filters, kernel_size=(filter_sizes[2], embed_size), kernel_initializer='normal',\n                                                                                    activation='relu')(x)\n\n    \n    maxpool_0 = MaxPool2D(pool_size=(maxlen - filter_sizes[0] + 1, 1))(conv_0)\n    x1 = Flatten()(maxpool_0)\n    maxpool_1 = MaxPool2D(pool_size=(maxlen - filter_sizes[1] + 1, 1))(conv_1)\n    x2 = Flatten()(maxpool_1)\n    maxpool_2 = MaxPool2D(pool_size=(maxlen - filter_sizes[2] + 1, 1))(conv_2)\n    x3 = Flatten()(maxpool_2)\n    \n    conc = concatenate([x1, x2, x3])\n    outp = Dense(5, activation=\"softmax\")(conc)\n    \n    # adam = optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)\n    \n    model = Model(inputs=inp, outputs=outp)\n    model.compile(loss='categorical_crossentropy',\n                  optimizer='Nadam',\n                  metrics=['accuracy'])\n\n    return model\n\n",
+      "execution_count": 12,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "collapsed": true,
+        "_uuid": "ede45693b3d260f77f808a3f715fba0d3d16d0b5"
+      },
+      "cell_type": "code",
+      "source": "def BiGRU():\n    inp = Input(shape=(maxlen, ))\n    x = Embedding(len(word_index) + 1, embed_size, weights=[embedding_matrix])(inp)\n    x = SpatialDropout1D(0.2)(x)\n    x = Bidirectional(GRU(80, return_sequences=True))(x)\n    avg_pool = GlobalAveragePooling1D()(x)\n    max_pool = GlobalMaxPooling1D()(x)\n    conc = concatenate([avg_pool, max_pool])\n    outp = Dense(5, activation=\"softmax\")(conc)\n    \n    # adam = optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)\n    \n    model = Model(inputs=inp, outputs=outp)\n    model.compile(loss='categorical_crossentropy',\n                  optimizer='Nadam',\n                  metrics=['accuracy'])\n\n    return model",
+      "execution_count": 15,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "436b26b92954db2199d4d0ca8e0609f0911a7366"
+      },
+      "cell_type": "code",
+      "source": "batch_size = 256\nepochs = 1\nmodel = TextCNN()\nmodel.summary()",
+      "execution_count": 13,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "__________________________________________________________________________________________________\nLayer (type)                    Output Shape         Param #     Connected to                     \n==================================================================================================\ninput_2 (InputLayer)            (None, 160)          0                                            \n__________________________________________________________________________________________________\nembedding_2 (Embedding)         (None, 160, 300)     5334300     input_2[0][0]                    \n__________________________________________________________________________________________________\nreshape_2 (Reshape)             (None, 160, 300, 1)  0           embedding_2[0][0]                \n__________________________________________________________________________________________________\nconv2d_4 (Conv2D)               (None, 159, 1, 32)   19232       reshape_2[0][0]                  \n__________________________________________________________________________________________________\nconv2d_5 (Conv2D)               (None, 158, 1, 32)   28832       reshape_2[0][0]                  \n__________________________________________________________________________________________________\nconv2d_6 (Conv2D)               (None, 157, 1, 32)   38432       reshape_2[0][0]                  \n__________________________________________________________________________________________________\nmax_pooling2d_1 (MaxPooling2D)  (None, 1, 1, 32)     0           conv2d_4[0][0]                   \n__________________________________________________________________________________________________\nmax_pooling2d_2 (MaxPooling2D)  (None, 1, 1, 32)     0           conv2d_5[0][0]                   \n__________________________________________________________________________________________________\nmax_pooling2d_3 (MaxPooling2D)  (None, 1, 1, 32)     0           conv2d_6[0][0]                   \n__________________________________________________________________________________________________\nflatten_1 (Flatten)             (None, 32)           0           max_pooling2d_1[0][0]            \n__________________________________________________________________________________________________\nflatten_2 (Flatten)             (None, 32)           0           max_pooling2d_2[0][0]            \n__________________________________________________________________________________________________\nflatten_3 (Flatten)             (None, 32)           0           max_pooling2d_3[0][0]            \n__________________________________________________________________________________________________\nconcatenate_1 (Concatenate)     (None, 96)           0           flatten_1[0][0]                  \n                                                                 flatten_2[0][0]                  \n                                                                 flatten_3[0][0]                  \n__________________________________________________________________________________________________\ndense_1 (Dense)                 (None, 5)            485         concatenate_1[0][0]              \n==================================================================================================\nTotal params: 5,421,281\nTrainable params: 5,421,281\nNon-trainable params: 0\n__________________________________________________________________________________________________\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "scrolled": true,
+        "_uuid": "92750ba9ae8d19a844419c6e376516e80e3c9b99"
+      },
+      "cell_type": "code",
+      "source": "[X_tra, X_val, y_tra, y_val] = train_test_split(X_train, Y_train, train_size=0.95, random_state=233)\n\nhistory = LossHistory()\nearlyStopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=2, verbose=1)\n\nhist = model.fit(X_tra, y_tra, batch_size=batch_size, epochs=epochs, validation_data=(X_val, y_val),\n                 callbacks=[earlyStopping, history], verbose=1)",
+      "execution_count": 14,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "/opt/conda/lib/python3.6/site-packages/sklearn/model_selection/_split.py:2022: FutureWarning: From version 0.21, test_size will always complement train_size unless both are specified.\n  FutureWarning)\n",
+          "name": "stderr"
+        },
+        {
+          "output_type": "stream",
+          "text": "Train on 148257 samples, validate on 7803 samples\nEpoch 1/1\n148257/148257 [==============================] - 614s 4ms/step - loss: 0.8669 - acc: 0.6438 - val_loss: 0.8562 - val_acc: 0.6474\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "c0484544efca5baffb1aba1f2047ab5f51d75832"
+      },
+      "cell_type": "code",
+      "source": "hist = model.fit(X_tra, y_tra, batch_size=batch_size, epochs=epochs, validation_data=(X_val, y_val),\n                 callbacks=[earlyStopping, history], verbose=1)",
+      "execution_count": 15,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "Train on 148257 samples, validate on 7803 samples\nEpoch 1/1\n148257/148257 [==============================] - 612s 4ms/step - loss: 0.7029 - acc: 0.7081 - val_loss: 0.8834 - val_acc: 0.6327\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "468e94896197f6933ff70cf4c2c5e2209ac7aee9",
+        "_kg_hide-output": false,
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "scores = model.evaluate(X_val, y_val, verbose=1)\nprint(\"Accuracy: %.2f%%\" % (scores[1]*100))\nfrom keras.utils import plot_model\nplot_model(model, to_file='model.png')",
+      "execution_count": 27,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "2ec685ca1c98bc1ed09a030b0450bb3025ea196c",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "import matplotlib.pyplot as plt\n%matplotlib inline\nhistory.loss_plot('epoch')\nhistory.loss_plot('batch')",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "6dfbb6fdb2281c12cb7deb2b064f8db2b0d26b1b",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "from IPython.display import SVG\nfrom keras.utils.vis_utils import model_to_dot\n\nSVG(model_to_dot(model).create(prog='dot', format='svg'))",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "7b5d6da31d32bfdd02ee271b81b5433965a896aa",
+        "collapsed": true
+      },
+      "cell_type": "code",
+      "source": "f = open('./Submission.csv', 'w')\nf.write('PhraseId,Sentiment\\n')\n\n\npredicted_classes = model.predict(X_test, batch_size=512, verbose=1)\npredicted_classes = np.argmax(predicted_classes, axis=1)\nfor i in range(0,X_test_PhraseID.shape[0]):\n    f.write(str(X_test_PhraseID[i])+\",\"+str(predicted_classes[i])+'\\n')\n\nf.close()",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "12571e668bf47d58f59ae444343bb22510e452ba"
+      },
+      "cell_type": "code",
+      "source": "sentence = \"I like this movie\"\nsentence = pad(sentence)\nsentence = tokenizer.texts_to_sequences([sentence])\nsentence = sequence.pad_sequences(sentence, maxlen=maxlen)\nprediction = model.predict(sentence, batch_size=1, verbose=1)\nprediction = np.argmax(prediction, axis=1)\nprint (prediction)",
+      "execution_count": 17,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "1/1 [==============================] - 0s 127ms/step\n[3]\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "4dff121d40a613b3011af97987e98000779afc51"
+      },
+      "cell_type": "code",
+      "source": "num = 9999\ntext = df_train['Phrase'].values[num]\nlabel = df_train['Sentiment'].values[num]\nprint(\"Raw text: \", text)\ntext = pad(text)\nsentence = tokenizer.texts_to_sequences([text])\nsentence = sequence.pad_sequences(sentence, maxlen=maxlen)\nprediction = model.predict(sentence, batch_size=1, verbose=1)\nprediction = np.argmax(prediction, axis=1)\nprint (\"prediction: :\",prediction)\nprint(\"True label: \", label)\n\n",
+      "execution_count": 18,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": "Raw text:  corny television\n1/1 [==============================] - 0s 14ms/step\nprediction: : [1]\nTrue label:  1\n",
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "collapsed": true,
+        "_uuid": "30f2c0be48194a71796e3691f9025727dfbb1289"
+      },
+      "cell_type": "code",
+      "source": "",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "name": "python",
+      "version": "3.6.5",
+      "mimetype": "text/x-python",
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "pygments_lexer": "ipython3",
+      "nbconvert_exporter": "python",
+      "file_extension": ".py"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 1
+}
